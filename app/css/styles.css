@@ -851,6 +851,33 @@ body {
   color: var(--text-muted);
 }
 
+/* ---- Reading & Learning ---- */
+.reading-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-primary);
+  line-height: 1.4;
+}
+
+.reading-meta {
+  display: flex;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+
+.text-amber { color: var(--amber); }
+.text-green { color: var(--green); }
+.text-red { color: var(--red); }
+
+textarea.text-input {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  font-family: var(--font-sans);
+}
+
 /* ---- Coach Chat ---- */
 .coach-container {
   display: flex;

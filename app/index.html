@@ -233,10 +233,141 @@
           </div>
         </div>
 
+        <!-- ===== READING CARD — shows 8PM+ ===== -->
+        <div class="card" x-show="shouldShow('reading')">
+          <!-- Active Book -->
+          <template x-if="activeBook">
+            <div>
+              <div class="card-header">
+                <span class="card-title">Reading Now</span>
+                <span class="card-badge" x-text="activeBook.progress_pct + '%'"></span>
+              </div>
+              <div class="reading-title" x-text="activeBook.title + (activeBook.author ? ' — ' + activeBook.author : '')"></div>
+              <div class="reading-meta">
+                <span x-text="activeBook.format || 'kindle'"></span>
+                <template x-if="activeBook.started_date">
+                  <span x-text="'· Started ' + daysAgo(activeBook.started_date) + 'd ago'"></span>
+                </template>
+              </div>
+              <div class="progress-bar mt-8">
+                <div class="progress-fill" :style="'width:' + (activeBook.progress_pct || 0) + '%'"></div>
+              </div>
+              <!-- Enjoyment prompt -->
+              <div class="toggle-row mt-8" x-show="shouldPromptEnjoyment()">
+                <span class="text-sm text-muted" style="flex:none;">Enjoying it?</span>
+                <button class="toggle-btn" :class="{ active: activeBook.enjoyment === 'yes' }" @click="setEnjoyment('yes')">Yes</button>
+                <button class="toggle-btn" :class="{ active: activeBook.enjoyment === 'meh' }" @click="setEnjoyment('meh')">Meh</button>
+                <button class="toggle-btn" :class="{ 'active-red': true }" @click="setEnjoyment('drop')" style="border-color:var(--red); color:var(--red);">Drop</button>
+              </div>
+              <div class="flex gap-8 mt-8">
+                <button class="toggle-btn active" style="flex:1;" @click="readingForm.item_id = activeBook.id; drawer = 'reading'">Log session</button>
+                <button class="toggle-btn" style="flex:none; padding:8px 12px;" @click="completeBook()">Finished</button>
+              </div>
+            </div>
+          </template>
+
+          <!-- No active book but queue exists -->
+          <template x-if="!activeBook && readingQueue.length > 0">
+            <div>
+              <div class="card-header"><span class="card-title">Start reading</span></div>
+              <div class="reading-title" x-text="readingQueue[0].title + (readingQueue[0].author ? ' — ' + readingQueue[0].author : '')"></div>
+              <button class="toggle-btn active mt-8" style="width:100%;" @click="startBook(readingQueue[0].id)">Start this one</button>
+            </div>
+          </template>
+
+          <!-- No active book, no queue -->
+          <template x-if="!activeBook && readingQueue.length === 0">
+            <div>
+              <div class="card-header"><span class="card-title">Reading</span></div>
+              <div class="text-sm text-muted">Nothing queued. Add something.</div>
+            </div>
+          </template>
+
+          <!-- Queue -->
+          <div x-show="readingQueue.length > 0" style="margin-top:16px; border-top:1px solid var(--border); padding-top:12px;">
+            <div class="card-title mb-8">Up next</div>
+            <template x-for="book in readingQueue" :key="book.id">
+              <div class="flex-between" style="padding:6px 0;">
+                <span style="font-size:13px;" x-text="book.title"></span>
+                <button style="background:none; border:none; color:var(--text-muted); cursor:pointer; font-size:14px; padding:4px 8px;" @click="removeFromQueue(book.id)">✕</button>
+              </div>
+            </template>
+          </div>
+          <button class="toggle-btn mt-8" style="width:100%;" @click="drawer = 'add-book'" x-show="readingQueue.length < 5">+ Add to queue</button>
+
+          <!-- Completed -->
+          <div x-show="completedBooks.length > 0" style="margin-top:16px; border-top:1px solid var(--border); padding-top:12px;">
+            <details>
+              <summary style="font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.06em; color:var(--text-muted); cursor:pointer;">
+                Completed (<span x-text="completedBooks.length"></span>)
+              </summary>
+              <template x-for="book in completedBooks" :key="book.id">
+                <div style="padding:8px 0; border-bottom:1px solid var(--border);">
+                  <div style="font-size:13px; font-weight:600;" x-text="book.title"></div>
+                  <div class="flex-between">
+                    <span class="text-xs text-muted" x-text="(book.takeaway_count || 0) + ' takeaways'"></span>
+                    <button class="text-xs" style="background:none; border:none; color:var(--accent); cursor:pointer;"
+                            @click="openTakeawayDrawer('book', book.title, book.id)" x-show="book.takeaway_count < 3">+ Takeaway</button>
+                  </div>
+                </div>
+              </template>
+            </details>
+          </div>
+        </div>
+
+        <!-- ===== PODCAST CARD — shows 8PM+ or weekends ===== -->
+        <div class="card" x-show="shouldShow('podcast')">
+          <div class="card-header">
+            <span class="card-title">Listening</span>
+            <span class="card-badge" x-text="podcastsThisWeek + ' this week'"></span>
+          </div>
+
+          <!-- Last listened -->
+          <template x-if="lastPodcast">
+            <div>
+              <div style="font-size:14px; font-weight:600;" x-text="lastPodcast.show"></div>
+              <div style="font-size:13px; color:var(--text-secondary); margin-top:2px;" x-text="lastPodcast.episode_title"></div>
+              <div class="reading-meta">
+                <span x-text="daysAgo(lastPodcast.date) === 0 ? 'Today' : daysAgo(lastPodcast.date) + 'd ago'"></span>
+                <template x-if="lastPodcast.context"><span x-text="'· ' + lastPodcast.context"></span></template>
+              </div>
+              <!-- Takeaway prompt -->
+              <div class="toggle-row mt-8" x-show="lastPodcast.captured_takeaway === null || lastPodcast.captured_takeaway === undefined">
+                <span class="text-sm text-muted" style="flex:none;">Takeaway?</span>
+                <button class="toggle-btn" @click="openTakeawayDrawer('podcast', lastPodcast.show + ' — ' + lastPodcast.episode_title, lastPodcast.id)">Capture</button>
+                <button class="toggle-btn" @click="skipPodcastTakeaway(lastPodcast.id)">Skip</button>
+              </div>
+              <div x-show="lastPodcast.captured_takeaway === true" class="text-sm" style="color:var(--green); margin-top:8px;">Takeaway captured</div>
+            </div>
+          </template>
+
+          <template x-if="!lastPodcast">
+            <div class="text-sm text-muted">No listens logged yet.</div>
+          </template>
+
+          <!-- Queued episodes -->
+          <div x-show="podcastQueue.length > 0" style="margin-top:12px; border-top:1px solid var(--border); padding-top:12px;">
+            <div class="card-title mb-8">Queued</div>
+            <template x-for="ep in podcastQueue" :key="ep.id">
+              <div class="flex-between" style="padding:6px 0;">
+                <div style="flex:1; min-width:0;">
+                  <div style="font-size:12px; font-weight:600; color:var(--text-secondary);" x-text="ep.show"></div>
+                  <div style="font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" x-text="ep.episode_title"></div>
+                </div>
+                <button class="toggle-btn" style="padding:4px 10px; font-size:11px; flex:none; margin-left:8px;" @click="markListened(ep.id)">Done</button>
+              </div>
+            </template>
+          </div>
+
+          <div class="flex gap-8 mt-8">
+            <button class="toggle-btn" style="flex:1;" @click="drawer = 'log-podcast'">+ Log a listen</button>
+            <button class="toggle-btn" style="flex:1;" @click="drawer = 'queue-podcast'" x-show="podcastQueue.length < 3">+ Queue episode</button>
+          </div>
+        </div>
+
         <!-- Quick-add buttons -->
         <div class="flex gap-8 mb-8" style="margin-top: 4px;">
           <button class="toggle-btn" style="flex: 1;" @click="drawer = 'exercise'">+ Exercise</button>
-          <button class="toggle-btn" style="flex: 1;" @click="drawer = 'reading'">+ Reading</button>
           <button class="toggle-btn" style="flex: 1;" @click="drawer = 'experience'">+ Experience</button>
         </div>
 
@@ -425,22 +556,90 @@
       </div>
     </div>
 
-    <!-- Reading + Side Quest row -->
-    <div class="widget-grid">
-      <div class="widget">
-        <div class="widget-label">Now Reading</div>
-        <div style="font-size: 14px; font-weight: 600;" x-text="stats.currentBook || 'Nothing active'"></div>
-        <div class="progress-bar" x-show="stats.bookProgress > 0">
+    <!-- Knowledge Pipeline -->
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">Knowledge Pipeline</span>
+      </div>
+      <!-- Reading -->
+      <div style="padding:8px 0; border-bottom:1px solid var(--border);">
+        <div class="flex-between">
+          <span style="font-size:12px; color:var(--text-muted);">Reading</span>
+          <span style="font-size:12px; color:var(--text-muted);" x-text="stats.lastReadLabel || ''"></span>
+        </div>
+        <div style="font-size:14px; font-weight:600; margin-top:4px;" x-text="stats.currentBook || 'Nothing active'"></div>
+        <div class="progress-bar mt-8" x-show="stats.bookProgress > 0" style="height:4px;">
           <div class="progress-fill" :style="'width:' + stats.bookProgress + '%'"></div>
         </div>
-        <div class="widget-sub" x-text="stats.lastReadLabel"></div>
       </div>
+      <!-- Listening -->
+      <div style="padding:8px 0; border-bottom:1px solid var(--border);">
+        <div class="flex-between">
+          <span style="font-size:12px; color:var(--text-muted);">Listening</span>
+          <span style="font-size:12px; color:var(--text-muted);" x-text="stats.podcastLabel"></span>
+        </div>
+        <template x-if="lastPodcast">
+          <div style="font-size:13px; margin-top:4px;" x-text="lastPodcast.show + ' — ' + lastPodcast.episode_title"></div>
+        </template>
+        <template x-if="!lastPodcast">
+          <div style="font-size:13px; color:var(--text-muted); margin-top:4px;">No listens yet</div>
+        </template>
+      </div>
+      <!-- Takeaways -->
+      <div style="padding:8px 0;">
+        <div class="flex-between">
+          <span style="font-size:12px; color:var(--text-muted);">Takeaways</span>
+          <span style="font-size:12px;" :class="unappliedTakeaways.length > 0 ? 'text-amber' : 'text-green'" x-text="stats.takeawayLabel"></span>
+        </div>
+        <template x-for="t in unappliedTakeaways.slice(0, 2)" :key="t.id">
+          <div class="flex-between" style="padding:4px 0;">
+            <div style="font-size:13px; flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+              "<span x-text="t.takeaway_text"></span>"
+            </div>
+            <button style="background:none; border:none; color:var(--accent); cursor:pointer; font-size:11px; flex:none; margin-left:8px;"
+                    @click="markTakeawayApplied(t.id)">Apply</button>
+          </div>
+        </template>
+        <div style="font-size:12px; color:var(--green); margin-top:4px;" x-text="'Applied this month: ' + appliedThisMonth"></div>
+      </div>
+    </div>
 
+    <!-- Side Quest + Sprint row -->
+    <div class="widget-grid">
       <div class="widget">
         <div class="widget-label">Last Side Quest</div>
         <div style="font-size: 14px; font-weight: 600;" x-text="stats.lastExperience || 'None yet'"></div>
         <div class="widget-sub" x-text="stats.lastExpDaysAgo"></div>
       </div>
+
+      <div class="widget" x-show="activeSprint">
+        <div class="widget-label" x-text="activeSprint?.month?.slice(5) + ' Sprint'"></div>
+        <div style="font-size:14px; font-weight:600;" x-text="activeSprint?.topic || ''"></div>
+        <div class="progress-bar mt-8" style="height:4px;">
+          <div class="progress-fill" :style="'width:' + sprintProgress + '%'"></div>
+        </div>
+        <div class="widget-sub" x-text="sprintConsumedCount + ' of ' + (activeSprint?.sources?.length || 0) + ' sources'"></div>
+      </div>
+    </div>
+
+    <!-- Learning Sprint detail -->
+    <div class="card" x-show="activeSprint" style="border-color:var(--accent);">
+      <div class="card-header">
+        <span class="card-title" x-text="'Sprint: ' + (activeSprint?.topic || '')"></span>
+        <span class="card-badge" x-text="sprintProgress + '%'"></span>
+      </div>
+      <template x-for="(src, idx) in activeSprint?.sources || []" :key="'sp'+idx">
+        <div class="flex-between" style="padding:6px 0; border-bottom:1px solid var(--border);">
+          <div style="flex:1; min-width:0;">
+            <div style="font-size:13px;" :style="src.consumed ? 'text-decoration:line-through; color:var(--text-muted);' : ''" x-text="src.title"></div>
+            <div class="text-xs text-muted" x-text="src.type || ''"></div>
+          </div>
+          <button class="toggle-btn" style="padding:4px 10px; font-size:11px; flex:none;"
+                  :class="{ active: src.consumed }"
+                  @click="markSprintSourceConsumed(idx)" x-text="src.consumed ? '✓' : 'Done'"></button>
+        </div>
+      </template>
+      <button class="toggle-btn mt-8" style="width:100%;" @click="openTakeawayDrawer('sprint', activeSprint?.topic, activeSprint?.id)">+ Sprint takeaway</button>
     </div>
 
     <!-- Rory's Pattern -->
@@ -548,6 +747,79 @@
       <button class="toggle-btn" :class="{ active: expForm.solo_or_social === 'social' }" @click="expForm.solo_or_social = 'social'">Social</button>
     </div>
     <button class="toggle-btn active mt-12" style="width: 100%;" @click="saveExperience()">Save</button>
+  </div>
+
+  <!-- Add Book Drawer -->
+  <div class="drawer-overlay" :class="{ open: drawer === 'add-book' }" @click="drawer = null"></div>
+  <div class="drawer" :class="{ open: drawer === 'add-book' }">
+    <div class="drawer-handle"></div>
+    <div class="card-title mb-8">Add to Reading Queue</div>
+    <input type="text" class="text-input mb-8" placeholder="Title" x-model="addBookForm.title">
+    <input type="text" class="text-input mb-8" placeholder="Author" x-model="addBookForm.author">
+    <div class="toggle-row">
+      <template x-for="f in ['kindle','physical','audiobook','pdf']" :key="f">
+        <button class="toggle-btn" :class="{ active: addBookForm.format === f }"
+                @click="addBookForm.format = f" x-text="f" style="text-transform:capitalize;"></button>
+      </template>
+    </div>
+    <button class="toggle-btn active mt-12" style="width:100%;" @click="addToQueue()">Add</button>
+  </div>
+
+  <!-- Log Podcast Drawer -->
+  <div class="drawer-overlay" :class="{ open: drawer === 'log-podcast' }" @click="drawer = null"></div>
+  <div class="drawer" :class="{ open: drawer === 'log-podcast' }">
+    <div class="drawer-handle"></div>
+    <div class="card-title mb-8">Log a Listen</div>
+    <input type="text" class="text-input mb-8" placeholder="Show name" x-model="podcastForm.show">
+    <input type="text" class="text-input mb-8" placeholder="Episode title" x-model="podcastForm.episode">
+    <div class="time-row">
+      <label>Mins</label>
+      <input type="number" class="time-input" x-model.number="podcastForm.duration" placeholder="45">
+    </div>
+    <div class="toggle-row mt-8">
+      <template x-for="c in ['drive','walk','gym','cooking','commute']" :key="c">
+        <button class="toggle-btn" :class="{ active: podcastForm.context === c }"
+                @click="podcastForm.context = c" x-text="c" style="text-transform:capitalize;"></button>
+      </template>
+    </div>
+    <div class="mb-8 mt-8">
+      <input type="text" class="text-input" placeholder="One takeaway (optional)" x-model="podcastForm.takeaway">
+    </div>
+    <button class="toggle-btn active mt-12" style="width:100%;" @click="logPodcast()">Save</button>
+  </div>
+
+  <!-- Queue Podcast Drawer -->
+  <div class="drawer-overlay" :class="{ open: drawer === 'queue-podcast' }" @click="drawer = null"></div>
+  <div class="drawer" :class="{ open: drawer === 'queue-podcast' }">
+    <div class="drawer-handle"></div>
+    <div class="card-title mb-8">Queue an Episode</div>
+    <input type="text" class="text-input mb-8" placeholder="Show name" x-model="queuePodcastForm.show">
+    <input type="text" class="text-input mb-8" placeholder="Episode title" x-model="queuePodcastForm.episode">
+    <button class="toggle-btn active mt-12" style="width:100%;" @click="queueEpisode()">Queue</button>
+  </div>
+
+  <!-- Takeaway Drawer -->
+  <div class="drawer-overlay" :class="{ open: drawer === 'takeaway' }" @click="drawer = null"></div>
+  <div class="drawer" :class="{ open: drawer === 'takeaway' }">
+    <div class="drawer-handle"></div>
+    <div class="card-title mb-8">Capture Takeaway</div>
+    <div class="text-sm text-muted mb-8" x-text="takeawaySource"></div>
+    <textarea class="text-input mb-8" rows="3" placeholder="What stuck with you?"
+              x-model="takeawayForm.text" style="resize:none;"></textarea>
+    <input type="text" class="text-input mb-8" placeholder="Applied to... (what changed in your life?)"
+           x-model="takeawayForm.appliedTo">
+    <button class="toggle-btn active" style="width:100%;" @click="saveTakeaway()">Save</button>
+    <div class="text-xs text-muted mt-8" x-text="takeawayCount + ' of 3 logged'"></div>
+  </div>
+
+  <!-- Apply Takeaway Drawer -->
+  <div class="drawer-overlay" :class="{ open: drawer === 'apply-takeaway' }" @click="drawer = null"></div>
+  <div class="drawer" :class="{ open: drawer === 'apply-takeaway' }">
+    <div class="drawer-handle"></div>
+    <div class="card-title mb-8">Apply Takeaway</div>
+    <div class="text-sm text-muted mb-8">What changed because of this insight?</div>
+    <input type="text" class="text-input mb-8" placeholder="Applied to..." x-model="takeawayForm.appliedTo">
+    <button class="toggle-btn active" style="width:100%;" @click="submitApplyTakeaway()">Save</button>
   </div>
 
   <!-- ===================== BOTTOM TAB BAR ===================== -->

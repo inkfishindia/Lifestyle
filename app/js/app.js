@@ -112,8 +112,27 @@ document.addEventListener('alpine:init', () => {
     // Meals
     mealLogs: [],
     mealSlots: ['breakfast', 'lunch', 'pre_sport', 'dinner', 'late_snack'],
-    // Reading
+    // Reading pipeline
     activeBooks: [],
+    activeBook: null,
+    readingQueue: [],
+    completedBooks: [],
+    bookTakeaways: [],
+
+    // Podcasts
+    podcastQueue: [],
+    recentPodcasts: [],
+    lastPodcast: null,
+    podcastsThisWeek: 0,
+
+    // Takeaways (cross-domain)
+    allTakeaways: [],
+    unappliedTakeaways: [],
+    appliedThisMonth: 0,
+
+    // Learning sprint
+    activeSprint: null,
+
     // Stats
     stats: {
       sleepHours: null, sleepDot: '', sleepLabel: '', sleepDebt: '0',
@@ -124,7 +143,8 @@ document.addEventListener('alpine:init', () => {
       lunchDot: '', lunchColor: '', lunchLabel: 'Not yet',
       caffeineOk: true,
       weeklyPattern: '',
-      satisfactionTrend: []
+      satisfactionTrend: [],
+      podcastLabel: '', takeawayLabel: ''
     },
     alerts: [],
 
@@ -132,6 +152,14 @@ document.addEventListener('alpine:init', () => {
     exerciseForm: { type: '', duration: null, intensity: '' },
     readingForm: { item_id: '', duration: null, progress: null },
     expForm: { name: '', category: '', energy: 0, fun: 0, solo_or_social: '' },
+    addBookForm: { title: '', author: '', format: 'kindle' },
+    podcastForm: { show: '', episode: '', duration: null, context: '', takeaway: '' },
+    queuePodcastForm: { show: '', episode: '' },
+    takeawayForm: { text: '', appliedTo: '' },
+    takeawaySource: '',
+    takeawaySourceType: 'book',
+    takeawaySourceId: null,
+    takeawayCount: 0,
 
     // Computed
     get greeting() {
@@ -171,13 +199,16 @@ document.addEventListener('alpine:init', () => {
     // ---- Time-aware card visibility ----
     shouldShow(card) {
       const h = currentHour();
+      const d = new Date().getDay();
       switch (card) {
         case 'sleep': return h >= 7 && h < 14;
-        case 'energy': return true; // always
+        case 'energy': return true;
         case 'habits': return h >= 21 || h < 3;
-        case 'meal': return true; // always, contextual
+        case 'meal': return true;
         case 'eod': return h >= 22 || h < 3;
         case 'caffeine': return h >= 14;
+        case 'reading': return h >= 20 || h < 3;
+        case 'podcast': return h >= 20 || h < 3 || d === 0 || d === 6;
         default: return true;
       }
     },
@@ -238,7 +269,10 @@ document.addEventListener('alpine:init', () => {
         this.loadEnergy(),
         this.loadHabits(),
         this.loadMeals(),
-        this.loadBooks(),
+        this.loadReadingPipeline(),
+        this.loadPodcasts(),
+        this.loadTakeaways(),
+        this.loadActiveSprint(),
         this.loadStats(),
         this.loadExperiment()
       ]);
@@ -294,6 +328,286 @@ document.addEventListener('alpine:init', () => {
       this.activeBooks = await sb.query('reading_items', 'status=eq.active&order=created_at.desc');
     },
 
+    // ---- Reading Pipeline ----
+    async loadReadingPipeline() {
+      const [active, queue, completed, takeaways] = await Promise.all([
+        sb.query('reading_items', 'status=eq.active&limit=1'),
+        sb.query('reading_items', 'status=eq.queue&order=queue_position.asc&limit=5'),
+        sb.query('reading_items', 'status=eq.completed&order=completed_date.desc&limit=10'),
+        sb.query('takeaways', 'source_type=eq.book&order=created_at.desc')
+      ]);
+      this.activeBook = active[0] || null;
+      this.activeBooks = active; // keep for existing reading drawer compat
+      this.readingQueue = queue;
+      // Attach takeaway counts to completed books
+      this.completedBooks = completed.map(b => ({
+        ...b,
+        takeaway_count: takeaways.filter(t => t.item_id === b.id).length
+      }));
+      this.bookTakeaways = this.activeBook
+        ? takeaways.filter(t => t.item_id === this.activeBook.id)
+        : [];
+    },
+
+    shouldPromptEnjoyment() {
+      if (!this.activeBook) return false;
+      if (!this.activeBook.last_enjoyment_check) return this.activeBook.started_date != null;
+      return daysAgo(this.activeBook.last_enjoyment_check) >= 7;
+    },
+
+    async setEnjoyment(val) {
+      if (!this.activeBook) return;
+      if (val === 'drop') {
+        await sb.update('reading_items', this.activeBook.id, {
+          status: 'dropped', enjoyment: 'meh', last_enjoyment_check: todayStr()
+        });
+        this.flash('Book dropped');
+        await this.promoteNextBook();
+        await this.loadReadingPipeline();
+        return;
+      }
+      await sb.update('reading_items', this.activeBook.id, {
+        enjoyment: val, last_enjoyment_check: todayStr()
+      });
+      this.activeBook.enjoyment = val;
+      this.activeBook.last_enjoyment_check = todayStr();
+      this.flash(val === 'yes' ? 'Keep going!' : 'Noted — give it a few more pages');
+    },
+
+    async promoteNextBook() {
+      if (this.readingQueue.length === 0) return;
+      const next = this.readingQueue[0];
+      await sb.update('reading_items', next.id, {
+        status: 'active', started_date: todayStr(), queue_position: null
+      });
+      // Reorder remaining queue
+      for (let i = 1; i < this.readingQueue.length; i++) {
+        await sb.update('reading_items', this.readingQueue[i].id, { queue_position: i });
+      }
+    },
+
+    async startBook(id) {
+      await sb.update('reading_items', id, {
+        status: 'active', started_date: todayStr(), queue_position: null
+      });
+      this.flash('Started reading');
+      await this.loadReadingPipeline();
+    },
+
+    async addToQueue() {
+      if (!this.addBookForm.title.trim()) return;
+      const pos = this.readingQueue.length + 1;
+      if (pos > 5) { this.flash('Queue full (max 5)', true); return; }
+      await sb.insert('reading_items', {
+        title: this.addBookForm.title.trim(),
+        author: this.addBookForm.author.trim(),
+        format: this.addBookForm.format,
+        status: 'queue',
+        queue_position: pos,
+        progress_pct: 0
+      });
+      this.addBookForm = { title: '', author: '', format: 'kindle' };
+      this.drawer = null;
+      this.flash('Added to queue');
+      await this.loadReadingPipeline();
+    },
+
+    async removeFromQueue(id) {
+      await sb.update('reading_items', id, { status: 'dropped' });
+      this.flash('Removed');
+      await this.loadReadingPipeline();
+    },
+
+    async completeBook() {
+      if (!this.activeBook) return;
+      await sb.update('reading_items', this.activeBook.id, {
+        status: 'completed', completed_date: todayStr(), progress_pct: 100
+      });
+      // Open takeaway drawer
+      this.takeawaySource = this.activeBook.title;
+      this.takeawaySourceType = 'book';
+      this.takeawaySourceId = this.activeBook.id;
+      this.takeawayCount = 0;
+      this.takeawayForm = { text: '', appliedTo: '' };
+      this.drawer = 'takeaway';
+      this.flash('Completed! Log your takeaways.');
+      await this.promoteNextBook();
+      await this.loadReadingPipeline();
+    },
+
+    // ---- Podcasts ----
+    async loadPodcasts() {
+      const [queued, recent] = await Promise.all([
+        sb.query('podcast_logs', 'status=eq.queued&order=created_at.asc&limit=3'),
+        sb.query('podcast_logs', 'status=eq.logged&order=date.desc&limit=5')
+      ]);
+      this.podcastQueue = queued;
+      this.recentPodcasts = recent;
+      this.lastPodcast = recent[0] || null;
+      // Count this week
+      const weekAgo = new Date();
+      weekAgo.setDate(weekAgo.getDate() - 7);
+      this.podcastsThisWeek = recent.filter(p => p.date >= weekAgo.toISOString().slice(0, 10)).length;
+    },
+
+    async logPodcast() {
+      if (!this.podcastForm.show.trim() || !this.podcastForm.episode.trim()) return;
+      const data = {
+        date: todayStr(),
+        show: this.podcastForm.show.trim(),
+        episode_title: this.podcastForm.episode.trim(),
+        context: this.podcastForm.context || null,
+        duration_min: this.podcastForm.duration || null,
+        status: 'logged',
+        captured_takeaway: !!this.podcastForm.takeaway.trim()
+      };
+      if (this.podcastForm.takeaway.trim()) {
+        data.takeaway_text = this.podcastForm.takeaway.trim();
+      }
+      await sb.insert('podcast_logs', data);
+      // Also save as a takeaway if provided
+      if (this.podcastForm.takeaway.trim()) {
+        await sb.insert('takeaways', {
+          source_type: 'podcast',
+          source_title: data.show + ' — ' + data.episode_title,
+          takeaway_text: this.podcastForm.takeaway.trim()
+        });
+      }
+      this.podcastForm = { show: '', episode: '', duration: null, context: '', takeaway: '' };
+      this.drawer = null;
+      this.flash('Podcast logged');
+      await this.loadPodcasts();
+      await this.loadTakeaways();
+    },
+
+    async queueEpisode() {
+      if (!this.queuePodcastForm.show.trim() || !this.queuePodcastForm.episode.trim()) return;
+      if (this.podcastQueue.length >= 3) { this.flash('Queue full (max 3)', true); return; }
+      await sb.insert('podcast_logs', {
+        show: this.queuePodcastForm.show.trim(),
+        episode_title: this.queuePodcastForm.episode.trim(),
+        status: 'queued'
+      });
+      this.queuePodcastForm = { show: '', episode: '' };
+      this.drawer = null;
+      this.flash('Episode queued');
+      await this.loadPodcasts();
+    },
+
+    async markListened(id) {
+      await sb.update('podcast_logs', id, { status: 'logged', date: todayStr() });
+      this.flash('Marked as listened');
+      await this.loadPodcasts();
+    },
+
+    async savePodcastTakeaway(id, text) {
+      if (!text.trim()) return;
+      const pod = this.recentPodcasts.find(p => p.id === id) || this.lastPodcast;
+      await sb.update('podcast_logs', id, { captured_takeaway: true, takeaway_text: text.trim() });
+      if (pod) {
+        await sb.insert('takeaways', {
+          source_type: 'podcast',
+          source_title: pod.show + ' — ' + pod.episode_title,
+          takeaway_text: text.trim()
+        });
+      }
+      this.flash('Takeaway captured');
+      await this.loadPodcasts();
+      await this.loadTakeaways();
+    },
+
+    async skipPodcastTakeaway(id) {
+      await sb.update('podcast_logs', id, { captured_takeaway: false });
+      this.lastPodcast.captured_takeaway = false;
+    },
+
+    // ---- Takeaways (cross-domain) ----
+    async loadTakeaways() {
+      const all = await sb.query('takeaways', 'order=created_at.desc&limit=50');
+      this.allTakeaways = all;
+      this.unappliedTakeaways = all.filter(t => !t.applied_to);
+      const monthStart = todayStr().slice(0, 7);
+      this.appliedThisMonth = all.filter(t => t.applied_date && t.applied_date.startsWith(monthStart)).length;
+    },
+
+    async saveTakeaway() {
+      if (!this.takeawayForm.text.trim()) return;
+      if (this.takeawayCount >= 3) { this.flash('Max 3 takeaways per source', true); return; }
+      await sb.insert('takeaways', {
+        item_id: this.takeawaySourceId,
+        source_type: this.takeawaySourceType,
+        source_title: this.takeawaySource,
+        takeaway_text: this.takeawayForm.text.trim(),
+        applied_to: this.takeawayForm.appliedTo.trim() || null,
+        applied_date: this.takeawayForm.appliedTo.trim() ? todayStr() : null
+      });
+      this.takeawayCount++;
+      this.takeawayForm = { text: '', appliedTo: '' };
+      this.flash('Takeaway saved (' + this.takeawayCount + '/3)');
+      if (this.takeawayCount >= 3) {
+        this.drawer = null;
+      }
+      await this.loadTakeaways();
+    },
+
+    async markTakeawayApplied(id) {
+      this.takeawayForm = { text: '', appliedTo: '' };
+      this.takeawaySourceId = id;
+      this.drawer = 'apply-takeaway';
+    },
+
+    async submitApplyTakeaway() {
+      if (!this.takeawayForm.appliedTo.trim()) return;
+      await sb.update('takeaways', this.takeawaySourceId, {
+        applied_to: this.takeawayForm.appliedTo.trim(),
+        applied_date: todayStr()
+      });
+      this.drawer = null;
+      this.flash('Applied!');
+      await this.loadTakeaways();
+    },
+
+    openTakeawayDrawer(sourceType, sourceTitle, sourceId) {
+      this.takeawaySource = sourceTitle;
+      this.takeawaySourceType = sourceType;
+      this.takeawaySourceId = sourceId;
+      this.takeawayCount = this.allTakeaways.filter(t =>
+        t.source_type === sourceType && (t.item_id === sourceId || t.source_title === sourceTitle)
+      ).length;
+      this.takeawayForm = { text: '', appliedTo: '' };
+      this.drawer = 'takeaway';
+    },
+
+    // ---- Learning Sprint ----
+    async loadActiveSprint() {
+      const month = todayStr().slice(0, 7);
+      const sprints = await sb.query('learning_sprints', `status=eq.active&order=created_at.desc&limit=1`);
+      this.activeSprint = sprints[0] || null;
+      if (this.activeSprint && typeof this.activeSprint.sources === 'string') {
+        this.activeSprint.sources = JSON.parse(this.activeSprint.sources);
+      }
+    },
+
+    get sprintProgress() {
+      if (!this.activeSprint?.sources?.length) return 0;
+      const consumed = this.activeSprint.sources.filter(s => s.consumed).length;
+      return Math.round((consumed / this.activeSprint.sources.length) * 100);
+    },
+
+    get sprintConsumedCount() {
+      if (!this.activeSprint?.sources) return 0;
+      return this.activeSprint.sources.filter(s => s.consumed).length;
+    },
+
+    async markSprintSourceConsumed(idx) {
+      if (!this.activeSprint) return;
+      const sources = [...this.activeSprint.sources];
+      sources[idx].consumed = !sources[idx].consumed;
+      await sb.update('learning_sprints', this.activeSprint.id, { sources: JSON.stringify(sources) });
+      this.activeSprint.sources = sources;
+      this.flash(sources[idx].consumed ? 'Source completed' : 'Unmarked');
+    },
+
     async loadStats() {
       const date = todayStr();
       const weekAgo = new Date();
@@ -345,16 +659,26 @@ document.addEventListener('alpine:init', () => {
       }
 
       // Reading
-      if (this.activeBooks.length) {
-        const book = this.activeBooks[0];
-        this.stats.currentBook = book.title;
-        this.stats.bookProgress = book.progress_pct || 0;
-        const sessions = await sb.query('reading_sessions', `item_id=eq.${book.id}&order=date.desc&limit=1`);
+      if (this.activeBook) {
+        this.stats.currentBook = this.activeBook.title;
+        this.stats.bookProgress = this.activeBook.progress_pct || 0;
+        const sessions = await sb.query('reading_sessions', `item_id=eq.${this.activeBook.id}&order=date.desc&limit=1`);
         if (sessions.length) {
           const ago = daysAgo(sessions[0].date);
           this.stats.lastReadLabel = `${sessions[0].duration_min} min · ${ago === 0 ? 'today' : ago + 'd ago'}`;
         }
+      } else if (this.activeBooks.length) {
+        const book = this.activeBooks[0];
+        this.stats.currentBook = book.title;
+        this.stats.bookProgress = book.progress_pct || 0;
       }
+
+      // Podcast stats
+      this.stats.podcastLabel = this.podcastsThisWeek + ' episode' + (this.podcastsThisWeek !== 1 ? 's' : '') + ' this week';
+
+      // Takeaway stats
+      const unapplied = this.unappliedTakeaways.length;
+      this.stats.takeawayLabel = unapplied > 0 ? unapplied + ' unapplied' : 'All applied';
 
       // Experience
       const exps = await sb.query('experience_logs', 'order=date.desc&limit=1');
@@ -466,6 +790,26 @@ document.addEventListener('alpine:init', () => {
         this.coachMessages.push({ coach: 'Rory', message: 'Afternoon crash detected. Light reading tonight — skip the dense stuff.', time: 'Today', actions: [] });
       }
 
+      // Naval: enjoyment = meh for active book
+      if (this.activeBook?.enjoyment === 'meh') {
+        this.coachMessages.push({ coach: 'Naval', message: `"${this.activeBook.title}" — you said meh. Life's too short. Drop it or give it 20 more pages.`, time: 'Today', actions: [{ label: '20 more pages', type: 'dismiss' }, { label: 'Drop', type: 'drop_book' }] });
+      }
+
+      // Naval: no podcast takeaways in 2 weeks
+      if (this.recentPodcasts.length >= 3 && !this.recentPodcasts.some(p => p.captured_takeaway)) {
+        this.coachMessages.push({ coach: 'Naval', message: 'Listening without capturing is entertainment, not learning. One takeaway from your next listen.', time: 'Today', actions: [] });
+      }
+
+      // Naval: empty reading queue
+      if (!this.activeBook && this.readingQueue.length === 0) {
+        this.coachMessages.push({ coach: 'Naval', message: 'Reading pipeline empty. What are you curious about right now?', time: 'Today', actions: [{ label: 'Add a book', type: 'add_book' }] });
+      }
+
+      // Rory: unapplied takeaways piling up
+      if (this.unappliedTakeaways.length >= 5) {
+        this.coachMessages.push({ coach: 'Rory', message: `${this.unappliedTakeaways.length} takeaways sitting unapplied. Knowledge without action is just trivia.`, time: 'Today', actions: [] });
+      }
+
       // Experiment review due
       if (this.activeExperiment) {
         const reviewDate = new Date(this.activeExperiment.review_date);
@@ -479,10 +823,13 @@ document.addEventListener('alpine:init', () => {
     async handleCoachAction(action) {
       if (action.type === 'dismiss') {
         // Remove the message
-      } else if (action.type === 'drop_book' && this.activeBooks.length) {
-        await sb.update('reading_items', this.activeBooks[0].id, { status: 'dropped' });
-        this.activeBooks.shift();
+      } else if (action.type === 'drop_book' && this.activeBook) {
+        await sb.update('reading_items', this.activeBook.id, { status: 'dropped' });
+        await this.promoteNextBook();
+        await this.loadReadingPipeline();
         this.flash('Book dropped');
+      } else if (action.type === 'add_book') {
+        this.drawer = 'add-book';
       } else if (action.type?.startsWith('exp_') && this.activeExperiment) {
         const outcome = action.type.replace('exp_', '');
         await sb.update('experiments', this.activeExperiment.id, { status: outcome === 'keep' ? 'kept' : outcome === 'drop' ? 'dropped' : 'adapted' });
@@ -762,14 +1109,25 @@ document.addEventListener('alpine:init', () => {
         progress_before: progressBefore,
         progress_after: this.readingForm.progress
       });
-      // Update book progress
+      // Update book progress + started_date
       if (book && this.readingForm.progress) {
-        await sb.update('reading_items', book.id, { progress_pct: this.readingForm.progress });
+        const updates = { progress_pct: this.readingForm.progress };
+        if (!book.started_date) updates.started_date = todayStr();
+        await sb.update('reading_items', book.id, updates);
         book.progress_pct = this.readingForm.progress;
+        if (updates.started_date) book.started_date = updates.started_date;
+      }
+      // Check if complete (100%)
+      if (this.readingForm.progress >= 100) {
+        this.readingForm = { item_id: '', duration: null, progress: null };
+        this.drawer = null;
+        await this.completeBook();
+        return;
       }
       this.readingForm = { item_id: '', duration: null, progress: null };
       this.drawer = null;
       this.flash('Reading logged');
+      await this.loadReadingPipeline();
     },
 
     // ---- Actions: Experience ----
