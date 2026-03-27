@@ -1,16 +1,9 @@
 {
-  "buildCommand": null,
-  "outputDirectory": "app",
-  "rewrites": [
-    { "source": "/(.*)", "destination": "/$1" }
+  "version": 2,
+  "builds": [
+    { "src": "server.js", "use": "@vercel/node" }
   ],
-  "headers": [
-    {
-      "source": "/sw.js",
-      "headers": [
-        { "key": "Cache-Control", "value": "no-cache" },
-        { "key": "Service-Worker-Allowed", "value": "/" }
-      ]
-    }
+  "rewrites": [
+    { "source": "/(.*)", "destination": "/server.js" }
   ]
 }

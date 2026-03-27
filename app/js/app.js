@@ -84,6 +84,12 @@ document.addEventListener('alpine:init', () => {
     // Coach
     coachMessages: [],
     activeExperiment: null,
+    // Live chat
+    chatMessages: [],
+    chatInput: '',
+    chatCoach: 'coach',
+    chatStreaming: false,
+    availableCoaches: [],
 
     // Today's daily log
     today: {},
@@ -195,6 +201,7 @@ document.addEventListener('alpine:init', () => {
       this.generateCoachMessages();
       this.computeHrvBaseline();
       this.scheduleCheckin();
+      this.loadCoaches();
     },
 
     // ---- Data Loading ----
@@ -818,6 +825,103 @@ document.addEventListener('alpine:init', () => {
         const avg = rows.reduce((sum, r) => sum + r.hrv_morning, 0) / rows.length;
         this.hrvBaseline = Math.round(avg);
       }
+    },
+
+    // ---- Live Chat with Coaches ----
+    coachColors: {
+      coach: '#94a3b8', james: '#3b82f6', andrew: '#22c55e',
+      naval: '#a78bfa', ali: '#f59e0b', rory: '#ec4899'
+    },
+
+    async loadCoaches() {
+      try {
+        const res = await fetch('/api/agents');
+        if (res.ok) {
+          this.availableCoaches = await res.json();
+        }
+      } catch (e) {
+        // API not available — static mode
+        this.availableCoaches = [];
+      }
+    },
+
+    async sendChat() {
+      const text = this.chatInput.trim();
+      if (!text || this.chatStreaming) return;
+
+      this.chatInput = '';
+      this.chatMessages.push({ role: 'user', content: text });
+      this.chatStreaming = true;
+
+      // Add empty assistant message to stream into
+      const assistantMsg = { role: 'assistant', content: '', coach: this.chatCoach };
+      this.chatMessages.push(assistantMsg);
+
+      this.$nextTick(() => this.scrollChat());
+
+      try {
+        const res = await fetch('/api/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            coach: this.chatCoach,
+            messages: this.chatMessages
+              .filter(m => m.role === 'user' || (m.role === 'assistant' && m.content))
+              .slice(-10)
+              .map(m => ({ role: m.role, content: m.content }))
+          })
+        });
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop();
+
+          for (const line of lines) {
+            if (!line.startsWith('data: ')) continue;
+            const data = line.slice(6);
+            if (data === '[DONE]') continue;
+            try {
+              const parsed = JSON.parse(data);
+              if (parsed.text) {
+                assistantMsg.content += parsed.text;
+                this.$nextTick(() => this.scrollChat());
+              }
+              if (parsed.error) {
+                assistantMsg.content += `\n\n[Error: ${parsed.error}]`;
+              }
+            } catch (e) { /* skip unparseable */ }
+          }
+        }
+      } catch (err) {
+        assistantMsg.content = `Connection error: ${err.message}`;
+      }
+
+      this.chatStreaming = false;
+      this.$nextTick(() => this.scrollChat());
+    },
+
+    scrollChat() {
+      const el = document.getElementById('chat-scroll');
+      if (el) el.scrollTop = el.scrollHeight;
+    },
+
+    selectCoach(name) {
+      if (this.chatCoach !== name) {
+        this.chatCoach = name;
+        this.chatMessages = [];
+      }
+    },
+
+    coachDisplayName(name) {
+      return name.charAt(0).toUpperCase() + name.slice(1);
     }
   }));
 });

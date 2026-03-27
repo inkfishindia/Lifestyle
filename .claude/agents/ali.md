@@ -94,8 +94,10 @@ When Dan asks what to try, research and suggest from categories like:
 
 ## Data Layer — Supabase
 
-All data lives in Supabase (project_id: `ocnpkjgjgyfslgewvqjt`). Use `execute_sql` MCP tool.
+All data lives in Supabase (project_id: `ocnpkjgjgyfslgewvqjt`).
+**Normally the `data` agent fetches everything and coach passes it to you.** The SQL below is reference. Use `execute_sql` directly only for WRITES (logging experiences, updating side quests).
 
+### Reference Queries
 ```sql
 -- All experiences
 SELECT * FROM experience_logs ORDER BY date DESC LIMIT 20;

@@ -104,16 +104,62 @@ WHERE m.slot = 'lunch' AND m.date >= CURRENT_DATE - 14;
 
 -- 18. Weekly insights (if any)
 SELECT * FROM weekly_insights ORDER BY week_start DESC LIMIT 4;
+
+-- 19. Miss type breakdown (James)
+SELECT miss_type, COUNT(*) FROM habit_logs
+WHERE date >= CURRENT_DATE - 14 AND NOT did_it GROUP BY miss_type;
+
+-- 20. Floor reliance (James)
+SELECT h.name, COUNT(*) FILTER (WHERE hl.floor_used) AS floor_days,
+       COUNT(*) FILTER (WHERE hl.did_it) AS total_done
+FROM habit_logs hl JOIN habits h ON h.id = hl.habit_id
+WHERE hl.date >= CURRENT_DATE - 14 GROUP BY h.name;
+
+-- 21. Sleep debt (Andrew)
+SELECT ROUND(7.0 - AVG(sleep_hours), 1) AS weekly_debt
+FROM daily_log WHERE date >= CURRENT_DATE - 7 AND sleep_hours IS NOT NULL;
+
+-- 22. Active + queued books (Naval)
+SELECT * FROM reading_items WHERE status IN ('active','queue') ORDER BY status, created_at;
+
+-- 23. Takeaways (Naval)
+SELECT t.takeaway_text, t.applied_to, ri.title FROM takeaways t
+JOIN reading_items ri ON ri.id = t.item_id ORDER BY t.created_at DESC LIMIT 10;
+
+-- 24. Category energy/fun averages (Ali)
+SELECT category, ROUND(AVG(energy_after),1) AS avg_energy,
+       ROUND(AVG(fun_score),1) AS avg_fun, COUNT(*) AS times
+FROM experience_logs GROUP BY category ORDER BY avg_energy DESC;
+
+-- 25. Side quest queue (Ali)
+SELECT * FROM side_quests WHERE status IN ('queued','suggested') ORDER BY priority;
+
+-- 26. Habit compliance by day type (Rory)
+SELECT d.day_type, ROUND(100.0 * COUNT(*) FILTER (WHERE hl.did_it) / NULLIF(COUNT(*),0)) AS compliance
+FROM daily_log d JOIN habit_logs hl ON d.date = hl.date
+WHERE d.date >= CURRENT_DATE - 14 GROUP BY d.day_type;
+
+-- 27. Keystone habit: next-day energy correlation (Rory)
+SELECT h.name, ROUND(AVG(e.energy),1) AS next_day_morning_energy
+FROM habit_logs hl JOIN habits h ON h.id = hl.habit_id
+JOIN energy_logs e ON e.date = hl.date + 1 AND e.slot = 'morning'
+WHERE hl.did_it AND hl.date >= CURRENT_DATE - 14 GROUP BY h.name;
+
+-- 28. Per-weekday performance (Rory)
+SELECT TO_CHAR(d.date, 'Day') AS weekday,
+       ROUND(AVG(d.sleep_hours),1) AS avg_sleep,
+       ROUND(AVG(d.decision_load),1) AS avg_decisions
+FROM daily_log d WHERE d.date >= CURRENT_DATE - 28 GROUP BY TO_CHAR(d.date, 'Day');
 ```
 
 ### Coach-Specific Fetch
 When coach needs data for only ONE specialist, run only that coach's queries:
 
-- **James only:** queries 2, 7, 8
-- **Andrew only:** queries 3, 4, 10, 11, 12, 17
-- **Naval only:** queries 5, 13, 14
-- **Ali only:** queries 15, 16
-- **Rory only:** queries 7-17 (needs everything for cross-domain)
+- **James only:** queries 2, 7, 8, 19, 20
+- **Andrew only:** queries 3, 4, 10, 11, 12, 17, 21
+- **Naval only:** queries 5, 13, 14, 22, 23
+- **Ali only:** queries 15, 16, 24, 25
+- **Rory only:** queries 7-28 (needs everything for cross-domain)
 
 ## Output Format
 
