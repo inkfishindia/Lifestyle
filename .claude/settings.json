@@ -1,0 +1,146 @@
+{
+  "permissions": {
+    "allow": [
+      "Read",
+      "Glob",
+      "Grep",
+      "Write(data/**)",
+      "Write(knowledge/**)",
+      "Write(outputs/**)",
+      "Write(MEMORY.md)",
+      "Edit(data/**)",
+      "Edit(knowledge/**)",
+      "Edit(outputs/**)",
+      "Edit(MEMORY.md)",
+      "Bash(ls *)",
+      "Bash(cat *)",
+      "Bash(date *)",
+      "Bash(mkdir *)",
+
+      "mcp__claude_ai_Google_Calendar__gcal_list_events",
+      "mcp__claude_ai_Google_Calendar__gcal_get_event",
+      "mcp__claude_ai_Google_Calendar__gcal_list_calendars",
+      "mcp__claude_ai_Google_Calendar__gcal_find_my_free_time",
+      "mcp__claude_ai_Google_Calendar__gcal_find_meeting_times",
+      "mcp__claude_ai_Google_Calendar__gcal_create_event",
+      "mcp__claude_ai_Google_Calendar__gcal_update_event",
+      "mcp__claude_ai_Google_Calendar__gcal_respond_to_event",
+      "mcp__claude_ai_Google_Calendar__gcal_delete_event",
+
+      "mcp__claude_ai_Gmail__gmail_search_messages",
+      "mcp__claude_ai_Gmail__gmail_read_message",
+      "mcp__claude_ai_Gmail__gmail_read_thread",
+      "mcp__claude_ai_Gmail__gmail_get_profile",
+      "mcp__claude_ai_Gmail__gmail_list_labels",
+      "mcp__claude_ai_Gmail__gmail_create_draft",
+
+      "mcp__notebooklm-mcp__notebook_list",
+      "mcp__notebooklm-mcp__notebook_get",
+      "mcp__notebooklm-mcp__notebook_create",
+      "mcp__notebooklm-mcp__notebook_query",
+      "mcp__notebooklm-mcp__notebook_describe",
+      "mcp__notebooklm-mcp__source_add",
+      "mcp__notebooklm-mcp__source_get_content",
+      "mcp__notebooklm-mcp__source_list_drive",
+      "mcp__notebooklm-mcp__note",
+      "mcp__notebooklm-mcp__research_start",
+      "mcp__notebooklm-mcp__research_status",
+      "mcp__notebooklm-mcp__studio_create",
+      "mcp__notebooklm-mcp__studio_status",
+      "mcp__notebooklm-mcp__download_artifact",
+
+      "mcp__chrome-devtools__navigate_page",
+      "mcp__chrome-devtools__take_screenshot",
+      "mcp__chrome-devtools__click",
+      "mcp__chrome-devtools__fill",
+      "mcp__chrome-devtools__evaluate_script",
+      "mcp__chrome-devtools__list_pages",
+      "mcp__chrome-devtools__new_page",
+      "mcp__chrome-devtools__close_page",
+      "mcp__chrome-devtools__press_key",
+      "mcp__chrome-devtools__type_text",
+      "mcp__chrome-devtools__wait_for",
+      "mcp__chrome-devtools__select_page",
+
+      "mcp__claude_ai_Hugging_Face__hf_doc_search",
+      "mcp__claude_ai_Hugging_Face__paper_search",
+
+      "mcp__claude_ai_Supabase__execute_sql",
+      "mcp__claude_ai_Supabase__list_tables",
+      "mcp__claude_ai_Supabase__get_project",
+      "mcp__claude_ai_Supabase__get_project_url",
+
+      "WebSearch",
+      "WebFetch(*)",
+      "Skill(*)"
+    ],
+    "deny": [
+      "mcp__claude_ai_Gmail__gmail_send_message",
+      "mcp__claude_ai_Slack__*",
+      "mcp__claude_ai_Canva__*",
+      "mcp__claude_ai_Figma__*",
+      "mcp__claude_ai_Vercel__*",
+      "Write(.claude/**)",
+      "Edit(.claude/**)",
+      "Write(CLAUDE.md)",
+      "Edit(CLAUDE.md)"
+    ]
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo '## Session Handoff'; cat data/sessions/handoff.md 2>/dev/null || echo 'No previous session.'; echo '---'; echo '## Recent Activity'; tail -10 data/sessions/activity-log.md 2>/dev/null || echo 'No activity log.'; echo '---'; echo '## Recent Decisions'; tail -5 data/sessions/decisions.md 2>/dev/null || echo 'No decisions.'; echo '---'; echo '## Today'; date '+%A %B %d, %Y %I:%M %p'"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "prompt",
+            "prompt": "Before stopping: 1) Update data/sessions/handoff.md with what was discussed, coaching given, what to follow up on next. Keep under 60 lines. 2) Append actions to data/sessions/activity-log.md (format: | date | coach | action | details | outcome |). 3) Append any decisions to data/sessions/decisions.md. 4) If any knowledge files were updated, note what changed."
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "prompt",
+            "prompt": "Context is about to be compacted. Save working state to data/sessions/handoff.md NOW — current coaching topic, Dan's last request, any pending recommendations. Also save any unsaved daily log data."
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "case \"$TOOL_INPUT\" in *'.claude/'*) echo 'BLOCKED: Cannot modify agent infrastructure (.claude/) — ask Dan to make this change directly' >&2 && exit 2;; *) exit 0;; esac"
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "prompt",
+            "prompt": "Review the agent's output: 1) Does it follow coaching principles (max 2-3 recommendations, tables, no guilt-tripping, floor versions included)? 2) Did it update the relevant knowledge file? 3) Is the recommendation specific and actionable, not generic? If any fail, fix before presenting to Dan."
+          }
+        ]
+      }
+    ]
+  }
+}
