@@ -74,6 +74,12 @@ function dayLabels() {
 // ---- Alpine App ----
 document.addEventListener('alpine:init', () => {
   Alpine.data('app', () => ({
+    // Auth
+    authRequired: false,
+    authed: false,
+    authPassword: '',
+    authError: '',
+
     view: 'log',
     drawer: null,
     doneForToday: false,
@@ -176,8 +182,48 @@ document.addEventListener('alpine:init', () => {
       }
     },
 
+    // ---- Auth ----
+    async checkAuth() {
+      try {
+        const res = await fetch('/api/agents');
+        if (res.status === 401) {
+          this.authRequired = true;
+          return false;
+        }
+        this.authed = true;
+        return true;
+      } catch (e) {
+        // No server (static mode) — no auth needed
+        return true;
+      }
+    },
+
+    async submitAuth() {
+      this.authError = '';
+      try {
+        const res = await fetch('/api/auth', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password: this.authPassword })
+        });
+        if (res.ok) {
+          this.authed = true;
+          this.authPassword = '';
+          this.init();
+        } else {
+          this.authError = 'Wrong password';
+        }
+      } catch (e) {
+        this.authError = 'Connection error';
+      }
+    },
+
     // ---- Init ----
     async init() {
+      // Check auth before loading anything
+      const authOk = await this.checkAuth();
+      if (!authOk && this.authRequired) return;
+
       // Register service worker
       if ('serviceWorker' in navigator) {
         navigator.serviceWorker.register('sw.js');

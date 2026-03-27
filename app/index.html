@@ -12,6 +12,23 @@
 </head>
 <body x-data="app" x-init="init()">
 
+  <!-- Auth Gate -->
+  <template x-if="authRequired && !authed">
+    <div style="display:flex; align-items:center; justify-content:center; height:100vh; padding:20px;">
+      <div style="width:100%; max-width:300px; text-align:center;">
+        <div style="font-size:18px; font-weight:700; color:var(--text-primary); margin-bottom:24px;">Lifestyle</div>
+        <input type="password" class="text-input" placeholder="Password" x-model="authPassword"
+               @keydown.enter="submitAuth()" style="text-align:center; margin-bottom:12px;">
+        <button class="toggle-btn active" style="width:100%; padding:12px;" @click="submitAuth()">Enter</button>
+        <div x-show="authError" style="color:var(--red); font-size:13px; margin-top:12px;" x-text="authError"></div>
+      </div>
+    </div>
+  </template>
+
+  <!-- Main App (hidden until authed) -->
+  <template x-if="!authRequired || authed">
+  <div>
+
   <!-- Save Toast -->
   <div class="save-toast" :class="{ show: toast.show, error: toast.error }" x-text="toast.message"></div>
 
@@ -548,6 +565,9 @@
       Status
     </button>
   </div>
+
+  </div>
+  </template>
 
   <script src="https://cdn.jsdelivr.net/npm/alpinejs@3/dist/cdn.min.js" defer></script>
   <script src="js/app.js"></script>
