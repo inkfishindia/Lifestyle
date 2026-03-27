@@ -1,0 +1,513 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#0a0a0a">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>Dan Lifestyle</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body x-data="app" x-init="init()">
+
+  <!-- Save Toast -->
+  <div class="save-toast" :class="{ show: toast.show, error: toast.error }" x-text="toast.message"></div>
+
+  <!-- Header -->
+  <div class="header">
+    <div>
+      <div class="header-title" x-text="greeting"></div>
+      <div class="header-date" x-text="dateLabel"></div>
+    </div>
+  </div>
+
+  <!-- ===================== LOG VIEW ===================== -->
+  <div class="container" x-show="view === 'log'" x-cloak>
+
+    <!-- Done-for-today closure -->
+    <template x-if="doneForToday">
+      <div style="text-align: center; padding: 80px 20px;">
+        <div style="font-size: 24px; font-weight: 700; color: var(--text-primary); margin-bottom: 12px; animation: fadeIn 0.6s ease;">You're done. Go live.</div>
+        <div style="font-size: 14px; color: var(--text-muted); margin-bottom: 24px;">Everything's logged for today.</div>
+        <a href="#" @click.prevent="doneForToday = false" style="font-size: 13px; color: var(--accent); text-decoration: underline;">Undo</a>
+      </div>
+    </template>
+
+    <template x-if="!doneForToday">
+      <div>
+
+        <!-- Quick Log -->
+        <div class="card">
+          <div style="display: flex; gap: 8px;">
+            <input type="text" class="text-input" placeholder="Swam 30 min, ate dosa, tried pottery..."
+                   x-model="quickLogText" @keydown.enter="parseQuickLog()" style="flex: 1;">
+            <button class="toggle-btn active" style="flex: none; width: 56px;" @click="parseQuickLog()">Send</button>
+          </div>
+        </div>
+
+        <!-- Alert Banner -->
+        <template x-if="alerts.length > 0">
+          <div>
+            <template x-for="alert in alerts" :key="alert.id">
+              <div class="alert" :class="'alert-' + alert.type" x-text="alert.message"></div>
+            </template>
+          </div>
+        </template>
+
+        <!-- SLEEP CARD — shows 7AM-2PM -->
+        <div class="card" x-show="shouldShow('sleep')">
+          <div class="card-header">
+            <span class="card-title">Sleep last night</span>
+            <span class="card-badge" x-show="today.sleep_hours" x-text="today.sleep_hours + 'h'"></span>
+          </div>
+          <div class="time-row">
+            <label>Slept</label>
+            <input type="time" class="time-input" x-model="today.sleep_start" @change="saveDailyField('sleep_start')">
+          </div>
+          <div class="time-row">
+            <label>Woke</label>
+            <input type="time" class="time-input" x-model="today.sleep_end" @change="saveDailyField('sleep_end')">
+          </div>
+          <div class="toggle-row">
+            <button class="toggle-btn" :class="{ active: today.sleep_quality === 1 }" @click="setSleepQuality(1)">Groggy</button>
+            <button class="toggle-btn" :class="{ active: today.sleep_quality === 2 }" @click="setSleepQuality(2)">Okay</button>
+            <button class="toggle-btn" :class="{ active: today.sleep_quality === 3 }" @click="setSleepQuality(3)">Rested</button>
+          </div>
+          <div class="toggle-row">
+            <button class="toggle-btn" :class="{ active: today.morning_sunlight }" @click="toggleDaily('morning_sunlight')">
+              Morning sunlight
+            </button>
+          </div>
+          <div class="time-row">
+            <label>HRV</label>
+            <input type="number" class="time-input" placeholder="e.g. 45" min="1" max="200"
+                   x-model.number="today.hrv_morning" @change="saveDailyField('hrv_morning')"
+                   style="font-family: var(--font-mono);">
+            <span class="text-sm text-muted" x-show="today.hrv_morning"
+                  :class="{ 'text-green': today.hrv_morning >= hrvBaseline, 'text-red': today.hrv_morning < hrvBaseline * 0.85 }"
+                  x-text="today.hrv_morning >= hrvBaseline ? 'Good' : today.hrv_morning >= hrvBaseline * 0.85 ? 'Okay' : 'Recovery day'"></span>
+          </div>
+        </div>
+
+        <!-- ENERGY CARD — always -->
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title">Right now</span>
+            <span class="card-badge" x-text="currentEnergySlot"></span>
+          </div>
+          <div class="dot-row">
+            <span class="dot-label">Energy</span>
+            <div class="dot-group">
+              <template x-for="n in 5" :key="'e'+n">
+                <button class="dot" :class="{ active: currentEnergy.energy >= n }" @click="setEnergy('energy', n)" x-text="n"></button>
+              </template>
+            </div>
+          </div>
+          <div class="dot-row">
+            <span class="dot-label">Mood</span>
+            <div class="dot-group">
+              <template x-for="n in 5" :key="'m'+n">
+                <button class="dot" :class="{ active: currentEnergy.mood >= n }" @click="setEnergy('mood', n)" x-text="n"></button>
+              </template>
+            </div>
+          </div>
+          <div class="dot-row">
+            <span class="dot-label">Focus</span>
+            <div class="dot-group">
+              <template x-for="n in 5" :key="'f'+n">
+                <button class="dot" :class="{ active: currentEnergy.focus >= n }" @click="setEnergy('focus', n)" x-text="n"></button>
+              </template>
+            </div>
+          </div>
+        </div>
+
+        <!-- HABITS CARD — shows 9PM+ -->
+        <div class="card" x-show="shouldShow('habits')">
+          <div class="card-header">
+            <span class="card-title">Habits</span>
+            <span class="card-badge" x-text="habitsCompletedOf14 + ' of 14'"></span>
+          </div>
+          <template x-for="habit in activeHabits" :key="habit.id">
+            <div>
+              <div class="habit-row">
+                <span class="habit-name" x-text="habit.name"></span>
+                <button class="habit-floor" :class="{ active: getHabitLog(habit.id)?.floor_used }"
+                        @click="toggleFloor(habit.id)" x-show="getHabitLog(habit.id)?.did_it">floor</button>
+                <button class="habit-check skip"
+                        :class="{ active: getHabitLog(habit.id)?.did_it === false }"
+                        @click="skipHabit(habit.id)"
+                        x-show="!getHabitLog(habit.id)?.did_it">
+                  <span>Skip</span>
+                </button>
+                <button class="habit-check"
+                        :class="{ done: getHabitLog(habit.id)?.did_it === true, missed: getHabitLog(habit.id)?.did_it === false }"
+                        @click="toggleHabit(habit.id)">
+                  <span x-text="getHabitLog(habit.id)?.did_it === true ? '\u2713' : getHabitLog(habit.id)?.did_it === false ? '\u2717' : '\u00B7'"></span>
+                </button>
+              </div>
+              <!-- Skip reason row -->
+              <div class="toggle-row mt-8" x-show="skipReasonHabitId === habit.id" x-transition>
+                <button class="toggle-btn" style="font-size:11px; padding:6px;" @click="setMissType('low_energy')">Low energy</button>
+                <button class="toggle-btn" style="font-size:11px; padding:6px;" @click="setMissType('no_time')">No time</button>
+                <button class="toggle-btn" style="font-size:11px; padding:6px;" @click="setMissType('forgot')">Forgot</button>
+                <button class="toggle-btn" style="font-size:11px; padding:6px;" @click="setMissType('external')">External</button>
+                <button class="toggle-btn" style="font-size:11px; padding:6px;" @click="setMissType('planned_skip')">Planned</button>
+              </div>
+            </div>
+          </template>
+        </div>
+
+        <!-- MEALS CARD — always -->
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title">Meals</span>
+            <span class="card-badge" x-text="mealsLoggedToday + ' logged'"></span>
+          </div>
+          <template x-for="slot in mealSlots" :key="slot">
+            <div class="flex-between" style="padding: 8px 0; border-bottom: 1px solid var(--border);">
+              <span style="font-size: 13px; text-transform: capitalize;" x-text="slot.replace('_',' ')"></span>
+              <div class="flex gap-8">
+                <button class="toggle-btn" style="padding: 6px 10px; flex: none;"
+                        :class="{ active: getMealLog(slot)?.protein === 'high' }"
+                        @click="logMeal(slot, 'high')">High P</button>
+                <button class="toggle-btn" style="padding: 6px 10px; flex: none;"
+                        :class="{ active: getMealLog(slot)?.protein === 'med' }"
+                        @click="logMeal(slot, 'med')">Med P</button>
+                <button class="toggle-btn" style="padding: 6px 10px; flex: none;"
+                        :class="{ 'active-red': getMealLog(slot)?.was_junk }"
+                        @click="toggleMealJunk(slot)">Junk</button>
+              </div>
+            </div>
+          </template>
+        </div>
+
+        <!-- END OF DAY CARD — shows 10PM+ -->
+        <div class="card" x-show="shouldShow('eod')">
+          <div class="card-header">
+            <span class="card-title">End of day</span>
+          </div>
+          <div class="mb-8">
+            <select class="select" x-model="today.day_type" @change="saveDailyField('day_type')">
+              <option value="">Day type...</option>
+              <option value="routine">Routine</option>
+              <option value="disrupted">Disrupted</option>
+              <option value="travel">Travel</option>
+              <option value="social-heavy">Social heavy</option>
+              <option value="recovery">Recovery</option>
+            </select>
+          </div>
+          <div class="dot-row">
+            <span class="dot-label">Decisions</span>
+            <div class="dot-group">
+              <template x-for="n in 5" :key="'d'+n">
+                <button class="dot" :class="{ active: today.decision_load >= n }" @click="setDailyDot('decision_load', n)" x-text="n"></button>
+              </template>
+            </div>
+          </div>
+          <div class="mb-8">
+            <input type="text" class="text-input" placeholder="Mood word..." x-model="today.mood_word"
+                   @change="saveDailyField('mood_word')" maxlength="30">
+          </div>
+          <div>
+            <input type="text" class="text-input" placeholder="Highlight of the day..."
+                   x-model="today.highlight" @change="saveDailyField('highlight')">
+          </div>
+        </div>
+
+        <!-- Quick-add buttons -->
+        <div class="flex gap-8 mb-8" style="margin-top: 4px;">
+          <button class="toggle-btn" style="flex: 1;" @click="drawer = 'exercise'">+ Exercise</button>
+          <button class="toggle-btn" style="flex: 1;" @click="drawer = 'reading'">+ Reading</button>
+          <button class="toggle-btn" style="flex: 1;" @click="drawer = 'experience'">+ Experience</button>
+        </div>
+
+        <!-- Done for Today -->
+        <button class="toggle-btn active" @click="markDoneForToday()"
+                style="width: 100%; padding: 14px; font-size: 15px; font-weight: 700; border-color: var(--green); background: var(--green-dim); color: var(--green); margin-bottom: 16px;">
+          Done for Today
+        </button>
+
+      </div>
+    </template>
+
+  </div>
+
+  <!-- ===================== COACH VIEW ===================== -->
+  <div class="container" x-show="view === 'coach'" x-cloak>
+
+    <!-- Active Experiment -->
+    <div class="card" x-show="activeExperiment" style="border-color: var(--accent);">
+      <div class="card-header">
+        <span class="card-title">Active Experiment</span>
+        <span class="card-badge" x-text="activeExperiment?.days_remaining + 'd left'"></span>
+      </div>
+      <div style="font-size: 14px; font-weight: 600; margin-bottom: 8px;" x-text="activeExperiment?.name"></div>
+      <div class="flex-between">
+        <span class="text-sm text-muted">Did it today?</span>
+        <div class="flex gap-8">
+          <button class="toggle-btn" style="padding: 6px 16px; flex: none;"
+                  :class="{ active: activeExperiment?.did_today === true }"
+                  @click="logExperimentDay(true)">Yes</button>
+          <button class="toggle-btn" style="padding: 6px 16px; flex: none;"
+                  :class="{ 'active-red': activeExperiment?.did_today === false }"
+                  @click="logExperimentDay(false)">No</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Chat Feed -->
+    <template x-if="coachMessages.length === 0">
+      <div style="text-align: center; padding: 60px 20px;">
+        <div style="font-size: 15px; color: var(--text-secondary); line-height: 1.6;">Your coaches are observing.<br>Insights will appear as data builds.</div>
+      </div>
+    </template>
+
+    <template x-for="(msg, i) in coachMessages" :key="'cm'+i">
+      <div style="margin-bottom: 12px;">
+        <div style="background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 14px;">
+          <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 4px;">
+            <span style="font-size: 12px; font-weight: 700; letter-spacing: 0.04em;"
+                  :style="{ color: {James:'#3b82f6', Andrew:'#22c55e', Naval:'#a78bfa', Ali:'#f59e0b', Rory:'#ec4899'}[msg.coach] || 'var(--text-secondary)' }"
+                  x-text="msg.coach"></span>
+            <span class="text-xs text-muted" x-text="msg.time"></span>
+          </div>
+          <div style="font-size: 14px; line-height: 1.5; color: var(--text-primary);" x-text="msg.message"></div>
+          <!-- Action buttons -->
+          <template x-if="msg.actions && msg.actions.length > 0">
+            <div class="flex gap-8 mt-8">
+              <template x-for="(action, ai) in msg.actions" :key="'ca'+i+ai">
+                <button class="toggle-btn" style="padding: 6px 12px; font-size: 12px; flex: none;"
+                        @click="handleCoachAction(action)" x-text="action.label"></button>
+              </template>
+            </div>
+          </template>
+        </div>
+      </div>
+    </template>
+
+  </div>
+
+  <!-- ===================== STATUS VIEW ===================== -->
+  <div class="container" x-show="view === 'status'" x-cloak>
+
+    <!-- Top Row: Sleep / Energy / Cascade -->
+    <div class="widget-grid">
+      <div class="widget">
+        <div class="widget-label">Sleep</div>
+        <div class="widget-value">
+          <span x-text="stats.sleepHours || '\u2014'"></span>
+          <span class="text-sm" x-text="stats.sleepHours ? 'hrs' : ''"></span>
+        </div>
+        <div class="widget-sub">
+          <span class="status-dot" :class="stats.sleepDot"></span>
+          <span x-text="stats.sleepLabel"></span>
+        </div>
+        <div class="widget-sub text-muted" x-text="'Debt: ' + stats.sleepDebt + 'h'"></div>
+      </div>
+
+      <div class="widget">
+        <div class="widget-label">Energy</div>
+        <div class="sparkline">
+          <template x-for="(v, i) in stats.energyCurve" :key="'ec'+i">
+            <div class="spark-bar" :class="{ current: i === stats.energyCurve.length - 1 }"
+                 :style="'height:' + (v * 20) + '%'"></div>
+          </template>
+        </div>
+        <div class="widget-sub" x-text="stats.energyLabel"></div>
+      </div>
+
+      <div class="widget" x-show="stats.cascadeRisk">
+        <div class="widget-label">Cascade Risk</div>
+        <div class="widget-value">
+          <span class="status-dot" :class="stats.cascadeDot"></span>
+          <span class="text-sm" x-text="stats.cascadeLabel" :class="'text-' + stats.cascadeColor"></span>
+        </div>
+        <div class="widget-sub" x-text="stats.cascadeDetail"></div>
+      </div>
+    </div>
+
+    <!-- Habits — fractions, no calendar grid -->
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">Habits</span>
+      </div>
+      <template x-for="habit in activeHabits" :key="'sh'+habit.id">
+        <div class="flex-between" style="padding: 8px 0; border-bottom: 1px solid var(--border);">
+          <span style="font-size: 13px;" x-text="habit.name"></span>
+          <span class="card-badge" x-text="getHabitFraction(habit.id)"></span>
+        </div>
+      </template>
+    </div>
+
+    <!-- Lunch / Caffeine row -->
+    <div class="widget-grid">
+      <div class="widget">
+        <div class="widget-label">Lunch</div>
+        <div class="widget-value">
+          <span class="status-dot" :class="stats.lunchDot"></span>
+          <span class="text-sm" :class="'text-' + stats.lunchColor" x-text="stats.lunchLabel"></span>
+        </div>
+      </div>
+      <div class="widget">
+        <div class="widget-label">Caffeine Window</div>
+        <div class="widget-value">
+          <span class="text-sm" :class="stats.caffeineOk ? 'text-green' : 'text-red'"
+                x-text="stats.caffeineOk ? 'OK' : 'LATE'"></span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Reading + Side Quest row -->
+    <div class="widget-grid">
+      <div class="widget">
+        <div class="widget-label">Now Reading</div>
+        <div style="font-size: 14px; font-weight: 600;" x-text="stats.currentBook || 'Nothing active'"></div>
+        <div class="progress-bar" x-show="stats.bookProgress > 0">
+          <div class="progress-fill" :style="'width:' + stats.bookProgress + '%'"></div>
+        </div>
+        <div class="widget-sub" x-text="stats.lastReadLabel"></div>
+      </div>
+
+      <div class="widget">
+        <div class="widget-label">Last Side Quest</div>
+        <div style="font-size: 14px; font-weight: 600;" x-text="stats.lastExperience || 'None yet'"></div>
+        <div class="widget-sub" x-text="stats.lastExpDaysAgo"></div>
+      </div>
+    </div>
+
+    <!-- Rory's Pattern -->
+    <div class="card" x-show="stats.weeklyPattern">
+      <div class="card-header">
+        <span class="card-title">Rory's Pattern</span>
+      </div>
+      <div style="font-size: 14px; line-height: 1.5; color: var(--text-secondary);" x-text="stats.weeklyPattern"></div>
+    </div>
+
+    <!-- Week Satisfaction -->
+    <div class="widget" style="margin-bottom: 12px;">
+      <div class="widget-label">Week Satisfaction (8 wks)</div>
+      <div class="sparkline" style="height: 28px;">
+        <template x-for="(v, i) in stats.satisfactionTrend" :key="'st'+i">
+          <div class="spark-bar" :class="{ current: i === stats.satisfactionTrend.length - 1 }"
+               :style="'height:' + (v * 10) + '%'"></div>
+        </template>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ===================== DRAWERS ===================== -->
+
+  <!-- Exercise Drawer -->
+  <div class="drawer-overlay" :class="{ open: drawer === 'exercise' }" @click="drawer = null"></div>
+  <div class="drawer" :class="{ open: drawer === 'exercise' }">
+    <div class="drawer-handle"></div>
+    <div class="card-title mb-8">Log Exercise</div>
+    <div class="toggle-row">
+      <template x-for="t in ['tennis','swimming','walk','cold_shower','gym','yoga']" :key="t">
+        <button class="toggle-btn" :class="{ active: exerciseForm.type === t }"
+                @click="exerciseForm.type = t" x-text="t.replace('_',' ')" style="text-transform: capitalize;"></button>
+      </template>
+    </div>
+    <div class="time-row mt-8">
+      <label>Mins</label>
+      <input type="number" class="time-input" x-model.number="exerciseForm.duration" placeholder="30" style="font-family: var(--font-mono);">
+    </div>
+    <div class="toggle-row mt-8">
+      <button class="toggle-btn" :class="{ active: exerciseForm.intensity === 'light' }" @click="exerciseForm.intensity = 'light'">Light</button>
+      <button class="toggle-btn" :class="{ active: exerciseForm.intensity === 'moderate' }" @click="exerciseForm.intensity = 'moderate'">Moderate</button>
+      <button class="toggle-btn" :class="{ active: exerciseForm.intensity === 'hard' }" @click="exerciseForm.intensity = 'hard'">Hard</button>
+    </div>
+    <button class="toggle-btn active mt-12" style="width: 100%;" @click="saveExercise()">Save</button>
+  </div>
+
+  <!-- Reading Drawer -->
+  <div class="drawer-overlay" :class="{ open: drawer === 'reading' }" @click="drawer = null"></div>
+  <div class="drawer" :class="{ open: drawer === 'reading' }">
+    <div class="drawer-handle"></div>
+    <div class="card-title mb-8">Log Reading</div>
+    <div class="mb-8">
+      <select class="select" x-model="readingForm.item_id">
+        <option value="">Select book...</option>
+        <template x-for="book in activeBooks" :key="book.id">
+          <option :value="book.id" x-text="book.title + ' (' + book.progress_pct + '%)'"></option>
+        </template>
+      </select>
+    </div>
+    <div class="time-row">
+      <label>Mins</label>
+      <input type="number" class="time-input" x-model.number="readingForm.duration" placeholder="20">
+    </div>
+    <div class="time-row mt-8">
+      <label>Now %</label>
+      <input type="number" class="time-input" x-model.number="readingForm.progress" placeholder="75" min="0" max="100">
+    </div>
+    <button class="toggle-btn active mt-12" style="width: 100%;" @click="saveReading()">Save</button>
+  </div>
+
+  <!-- Experience Drawer -->
+  <div class="drawer-overlay" :class="{ open: drawer === 'experience' }" @click="drawer = null"></div>
+  <div class="drawer" :class="{ open: drawer === 'experience' }">
+    <div class="drawer-handle"></div>
+    <div class="card-title mb-8">Log Experience</div>
+    <div class="mb-8">
+      <input type="text" class="text-input" placeholder="What did you try?" x-model="expForm.name">
+    </div>
+    <div class="toggle-row">
+      <template x-for="c in ['art_making','music','movement','culinary','creative_tech','community']" :key="c">
+        <button class="toggle-btn" :class="{ active: expForm.category === c }" @click="expForm.category = c"
+                x-text="c.replace('_',' ')" style="font-size: 10px; text-transform: capitalize;"></button>
+      </template>
+    </div>
+    <div class="dot-row mt-8">
+      <span class="dot-label">Energy</span>
+      <div class="dot-group">
+        <template x-for="n in 5" :key="'xe'+n">
+          <button class="dot" :class="{ active: expForm.energy >= n }" @click="expForm.energy = n" x-text="n"></button>
+        </template>
+      </div>
+    </div>
+    <div class="dot-row">
+      <span class="dot-label">Fun</span>
+      <div class="dot-group">
+        <template x-for="n in 5" :key="'xf'+n">
+          <button class="dot" :class="{ active: expForm.fun >= n }" @click="expForm.fun = n" x-text="n"></button>
+        </template>
+      </div>
+    </div>
+    <div class="toggle-row mt-8">
+      <button class="toggle-btn" :class="{ active: expForm.solo_or_social === 'solo' }" @click="expForm.solo_or_social = 'solo'">Solo</button>
+      <button class="toggle-btn" :class="{ active: expForm.solo_or_social === 'social' }" @click="expForm.solo_or_social = 'social'">Social</button>
+    </div>
+    <button class="toggle-btn active mt-12" style="width: 100%;" @click="saveExperience()">Save</button>
+  </div>
+
+  <!-- ===================== BOTTOM TAB BAR ===================== -->
+  <div class="quick-add">
+    <button class="quick-add-btn" :class="{ active: view === 'log' }" @click="view = 'log'"
+            :style="view === 'log' ? 'border-color: var(--accent); color: var(--text-primary); background: var(--accent-dim);' : ''">
+      Log
+    </button>
+    <button class="quick-add-btn" :class="{ active: view === 'coach' }" @click="view = 'coach'"
+            :style="view === 'coach' ? 'border-color: var(--accent); color: var(--text-primary); background: var(--accent-dim);' : ''">
+      Coach
+    </button>
+    <button class="quick-add-btn" :class="{ active: view === 'status' }" @click="view = 'status'"
+            :style="view === 'status' ? 'border-color: var(--accent); color: var(--text-primary); background: var(--accent-dim);' : ''">
+      Status
+    </button>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/alpinejs@3/dist/cdn.min.js" defer></script>
+  <script src="js/app.js"></script>
+
+  <style>
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+  </style>
+</body>
+</html>
