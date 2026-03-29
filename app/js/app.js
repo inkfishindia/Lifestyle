@@ -737,85 +737,46 @@ document.addEventListener('alpine:init', () => {
     },
 
     // ---- Coach Messages (generated from data) ----
-    generateCoachMessages() {
-      this.coachMessages = [];
+    async generateCoachMessages() {
+      // 1. Load agent-written messages from Supabase (the real ones)
+      const dbMessages = await sb.query('coach_messages', `date=gte.${todayStr()}&order=created_at.desc`);
+      this.coachMessages = dbMessages.map(m => ({
+        id: m.id,
+        coach: m.coach,
+        message: m.message,
+        time: new Date(m.created_at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }),
+        actions: m.actions || [],
+        read: m.read
+      }));
+
+      // 2. Add real-time local nudges (time-sensitive, don't need agent session)
       const h = currentHour();
 
-      // Andrew: sleep deficit
       if (this.today.sleep_hours && parseFloat(this.today.sleep_hours) < 6.5) {
-        this.coachMessages.push({ coach: 'Andrew', message: 'NSDR at 3 PM today. 15 minutes. Non-negotiable.', time: 'Today', actions: [{ label: 'Got it', type: 'dismiss' }] });
+        this.coachMessages.push({ coach: 'Andrew', message: 'NSDR at 3 PM today. 15 minutes. Non-negotiable.', time: 'Now', actions: [{ label: 'Got it', type: 'dismiss' }] });
       }
 
-      // Andrew: lunch nudge at 12:15+
       if (h >= 12 && h < 14 && !this.mealLogs.find(m => m.slot === 'lunch')) {
         this.coachMessages.push({ coach: 'Andrew', message: 'Lunch time. Eat something — even dal chawal. Crash hits in 2 hours.', time: 'Now', actions: [] });
       }
 
-      // James: never miss twice
+      if (this.today.sleep_hours && parseFloat(this.today.sleep_hours) < 6) {
+        this.coachMessages.push({ coach: 'James', message: 'Floor version day. Habits shrink automatically — your sleep was under 6 hours.', time: 'Now', actions: [] });
+      }
+
       const yesterday = new Date(); yesterday.setDate(yesterday.getDate() - 1);
       const yStr = yesterday.toISOString().slice(0, 10);
       const yMisses = this.weekHabitLogs.filter(l => l.date === yStr && !l.did_it);
       if (yMisses.length > 0) {
         const habit = this.activeHabits.find(h => h.id === yMisses[0].habit_id);
-        this.coachMessages.push({ coach: 'James', message: `Never miss twice. ${habit?.floor_version || 'Floor version'} is enough tonight.`, time: 'Today', actions: [] });
+        this.coachMessages.push({ coach: 'James', message: `Never miss twice. ${habit?.floor_version || 'Floor version'} is enough tonight.`, time: 'Now', actions: [] });
       }
 
-      // James: floor version day (sleep < 6hrs)
-      if (this.today.sleep_hours && parseFloat(this.today.sleep_hours) < 6) {
-        this.coachMessages.push({ coach: 'James', message: 'Floor version day. Habits shrink automatically — your sleep was under 6 hours.', time: 'Today', actions: [] });
-      }
-
-      // Naval: book stalled
-      if (this.activeBooks.length) {
-        // Will show stalled message if no sessions in 10+ days (loaded in loadStats)
-        if (this.stats.lastReadLabel && this.stats.lastReadLabel.includes('d ago')) {
-          const daysMatch = this.stats.lastReadLabel.match(/(\d+)d ago/);
-          if (daysMatch && parseInt(daysMatch[1]) >= 10) {
-            this.coachMessages.push({ coach: 'Naval', message: `"${this.stats.currentBook}" — keep or drop? It's been ${daysMatch[1]} days.`, time: 'Today', actions: [{ label: 'Keep', type: 'dismiss' }, { label: 'Drop', type: 'drop_book' }] });
-          }
-        }
-      }
-
-      // Ali: no experience in 21+ days
-      if (this.stats.lastExpDaysAgo) {
-        const match = this.stats.lastExpDaysAgo.match(/(\d+)/);
-        if (match && parseInt(match[1]) >= 21) {
-          this.coachMessages.push({ coach: 'Ali', message: 'Your cringe budget hasn\'t been touched in 3 weeks. One low-stakes push for this weekend?', time: 'Today', actions: [] });
-        }
-      }
-
-      // Rory: afternoon energy cascade
-      const afternoonEnergy = this.energyReadings.find(e => e.slot === 'afternoon');
-      if (afternoonEnergy && afternoonEnergy.energy < 3) {
-        this.coachMessages.push({ coach: 'Rory', message: 'Afternoon crash detected. Light reading tonight — skip the dense stuff.', time: 'Today', actions: [] });
-      }
-
-      // Naval: enjoyment = meh for active book
-      if (this.activeBook?.enjoyment === 'meh') {
-        this.coachMessages.push({ coach: 'Naval', message: `"${this.activeBook.title}" — you said meh. Life's too short. Drop it or give it 20 more pages.`, time: 'Today', actions: [{ label: '20 more pages', type: 'dismiss' }, { label: 'Drop', type: 'drop_book' }] });
-      }
-
-      // Naval: no podcast takeaways in 2 weeks
-      if (this.recentPodcasts.length >= 3 && !this.recentPodcasts.some(p => p.captured_takeaway)) {
-        this.coachMessages.push({ coach: 'Naval', message: 'Listening without capturing is entertainment, not learning. One takeaway from your next listen.', time: 'Today', actions: [] });
-      }
-
-      // Naval: empty reading queue
-      if (!this.activeBook && this.readingQueue.length === 0) {
-        this.coachMessages.push({ coach: 'Naval', message: 'Reading pipeline empty. What are you curious about right now?', time: 'Today', actions: [{ label: 'Add a book', type: 'add_book' }] });
-      }
-
-      // Rory: unapplied takeaways piling up
-      if (this.unappliedTakeaways.length >= 5) {
-        this.coachMessages.push({ coach: 'Rory', message: `${this.unappliedTakeaways.length} takeaways sitting unapplied. Knowledge without action is just trivia.`, time: 'Today', actions: [] });
-      }
-
-      // Experiment review due
       if (this.activeExperiment) {
         const reviewDate = new Date(this.activeExperiment.review_date);
         const today = new Date(todayStr());
         if (reviewDate <= today) {
-          this.coachMessages.push({ coach: 'Rory', message: `Experiment "${this.activeExperiment.name}" — review time. Keep, drop, or adapt?`, time: 'Today', actions: [{ label: 'Keep', type: 'exp_keep' }, { label: 'Drop', type: 'exp_drop' }, { label: 'Adapt', type: 'exp_adapt' }] });
+          this.coachMessages.push({ coach: 'Rory', message: `Experiment "${this.activeExperiment.name}" — review time. Keep, drop, or adapt?`, time: 'Now', actions: [{ label: 'Keep', type: 'exp_keep' }, { label: 'Drop', type: 'exp_drop' }, { label: 'Adapt', type: 'exp_adapt' }] });
         }
       }
     },
