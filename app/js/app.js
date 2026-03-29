@@ -28,18 +28,34 @@ const sb = {
   },
 
   async insert(table, data) {
-    const r = await fetch(`${SUPABASE_URL}/rest/v1/${table}`, {
-      method: 'POST', headers: this.headers, body: JSON.stringify(data)
-    });
-    return r.ok ? r.json() : null;
+    try {
+      const r = await fetch(`${SUPABASE_URL}/rest/v1/${table}`, {
+        method: 'POST', headers: this.headers, body: JSON.stringify(data)
+      });
+      return r.ok ? r.json() : null;
+    } catch {
+      this._queueOffline({ method: 'insert', table, data });
+      return null;
+    }
   },
 
   async update(table, id, data) {
+    try {
     const h = { ...this.headers };
     const r = await fetch(`${SUPABASE_URL}/rest/v1/${table}?id=eq.${id}`, {
       method: 'PATCH', headers: h, body: JSON.stringify(data)
     });
     return r.ok ? r.json() : null;
+    } catch {
+      this._queueOffline({ method: 'update', table, id, data });
+      return null;
+    }
+  },
+
+  _queueOffline(item) {
+    const queue = JSON.parse(localStorage.getItem('dl_offline_queue') || '[]');
+    queue.push({ ...item, queued_at: new Date().toISOString() });
+    localStorage.setItem('dl_offline_queue', JSON.stringify(queue));
   }
 };
 
@@ -84,6 +100,13 @@ document.addEventListener('alpine:init', () => {
     drawer: null,
     doneForToday: false,
     quickLogText: '',
+    showOnboarding: false,
+    onboardStep: 1,
+    onboard: { wakeTime: '10:00', sleepTime: '02:30', sports: [], bookTitle: '', bookAuthor: '', food: '', oneChange: '' },
+    // Settings forms
+    newHabitName: '', newHabitFloor: '',
+    newBookTitle: '',
+    newExpName: '', newExpCriteria: '',
     toast: { show: false, message: '', error: false },
     _toastTimer: null,
 
@@ -281,6 +304,12 @@ document.addEventListener('alpine:init', () => {
       this.generateCoachMessages();
       this.computeHrvBaseline();
       this.scheduleCheckin();
+      this.syncOfflineQueue();
+
+      // Show onboarding if no habits and never onboarded
+      if (this.activeHabits.length === 0 && !localStorage.getItem('dl_onboarded')) {
+        this.showOnboarding = true;
+      }
       this.loadCoaches();
     },
 
@@ -1189,6 +1218,130 @@ document.addEventListener('alpine:init', () => {
       if (rows.length >= 3) {
         const avg = rows.reduce((sum, r) => sum + r.hrv_morning, 0) / rows.length;
         this.hrvBaseline = Math.round(avg);
+      }
+    },
+
+    // ---- Onboarding ----
+    async completeOnboarding() {
+      // Create first habit from "one thing to change"
+      if (this.onboard.oneChange) {
+        await sb.insert('habits', {
+          name: this.onboard.oneChange,
+          standard_version: this.onboard.oneChange,
+          floor_version: '2-minute version',
+          status: 'active',
+          phase: 'experiment'
+        });
+      }
+      // Add book if provided
+      if (this.onboard.bookTitle) {
+        await sb.insert('reading_items', {
+          title: this.onboard.bookTitle,
+          author: this.onboard.bookAuthor || null,
+          status: 'active',
+          progress_pct: 0
+        });
+      }
+      // Save preferences to localStorage
+      localStorage.setItem('dl_onboarded', 'true');
+      localStorage.setItem('dl_wake', this.onboard.wakeTime);
+      localStorage.setItem('dl_sleep', this.onboard.sleepTime);
+      localStorage.setItem('dl_sports', JSON.stringify(this.onboard.sports));
+      localStorage.setItem('dl_food', this.onboard.food);
+
+      this.showOnboarding = false;
+      // Reload data
+      await Promise.all([this.loadHabits(), this.loadBooks()]);
+      this.flash('Welcome! Let\'s go.');
+    },
+
+    // ---- Settings: Habits ----
+    async addHabit() {
+      if (!this.newHabitName || this.activeHabits.length >= 3) return;
+      const created = await sb.insert('habits', {
+        name: this.newHabitName,
+        floor_version: this.newHabitFloor || '2-minute version',
+        status: 'active',
+        phase: 'experiment'
+      });
+      if (created?.[0]) this.activeHabits.push(created[0]);
+      this.newHabitName = '';
+      this.newHabitFloor = '';
+      this.flash('Habit added');
+    },
+
+    async pauseHabit(id) {
+      await sb.update('habits', id, { status: 'paused' });
+      this.activeHabits = this.activeHabits.filter(h => h.id !== id);
+      this.flash('Habit paused');
+    },
+
+    async graduateHabit(id) {
+      await sb.update('habits', id, { status: 'graduated', phase: 'graduated' });
+      this.activeHabits = this.activeHabits.filter(h => h.id !== id);
+      this.flash('Habit graduated!');
+    },
+
+    // ---- Settings: Books ----
+    async addBook() {
+      if (!this.newBookTitle) return;
+      const created = await sb.insert('reading_items', {
+        title: this.newBookTitle,
+        status: 'active',
+        progress_pct: 0
+      });
+      if (created?.[0]) this.activeBooks.push(created[0]);
+      this.newBookTitle = '';
+      this.flash('Book added');
+    },
+
+    async dropBook(id) {
+      await sb.update('reading_items', id, { status: 'dropped' });
+      this.activeBooks = this.activeBooks.filter(b => b.id !== id);
+      this.flash('Book dropped');
+    },
+
+    // ---- Settings: Experiments ----
+    async startExperiment() {
+      if (!this.newExpName) return;
+      const reviewDate = new Date();
+      reviewDate.setDate(reviewDate.getDate() + 14);
+      const created = await sb.insert('experiments', {
+        name: this.newExpName,
+        success_criteria: this.newExpCriteria,
+        started_date: todayStr(),
+        review_date: reviewDate.toISOString().slice(0, 10),
+        status: 'active'
+      });
+      if (created?.[0]) {
+        created[0].days_remaining = 14;
+        this.activeExperiment = created[0];
+      }
+      this.newExpName = '';
+      this.newExpCriteria = '';
+      this.drawer = null;
+      this.flash('Experiment started — 14 days');
+    },
+
+    // ---- Offline Write Queue ----
+    async syncOfflineQueue() {
+      const queue = JSON.parse(localStorage.getItem('dl_offline_queue') || '[]');
+      if (!queue.length) return;
+      const failed = [];
+      for (const item of queue) {
+        try {
+          if (item.method === 'insert') {
+            await sb.insert(item.table, item.data);
+          } else if (item.method === 'update') {
+            await sb.update(item.table, item.id, item.data);
+          }
+        } catch {
+          failed.push(item);
+        }
+      }
+      localStorage.setItem('dl_offline_queue', JSON.stringify(failed));
+      if (queue.length > failed.length) {
+        this.flash(`Synced ${queue.length - failed.length} offline entries`);
       }
     },
 

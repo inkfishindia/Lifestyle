@@ -38,6 +38,8 @@
       <div class="header-title" x-text="greeting"></div>
       <div class="header-date" x-text="dateLabel"></div>
     </div>
+    <button style="background:none; border:none; color:var(--text-muted); font-size:18px; cursor:pointer; padding:4px 8px;"
+            @click="drawer = 'settings'">&#9881;</button>
   </div>
 
   <!-- ===================== LOG VIEW ===================== -->
@@ -661,6 +663,120 @@
       </div>
     </div>
 
+  </div>
+
+  <!-- ===================== ONBOARDING ===================== -->
+  <template x-if="showOnboarding">
+    <div style="position:fixed; inset:0; background:var(--bg-primary); z-index:500; overflow-y:auto;">
+      <div class="container" style="max-width:380px; padding-top:60px;">
+        <!-- Step 1 -->
+        <div x-show="onboardStep === 1">
+          <div style="font-size:24px; font-weight:700; margin-bottom:8px;">Welcome, Dan.</div>
+          <div style="color:var(--text-secondary); margin-bottom:24px;">5 quick questions. Your coaches figure out the rest.</div>
+          <div class="mb-8">
+            <div class="card-title mb-8">What time do you usually wake up?</div>
+            <input type="time" class="time-input" x-model="onboard.wakeTime" value="10:00">
+          </div>
+          <div class="mb-8">
+            <div class="card-title mb-8">What time do you sleep?</div>
+            <input type="time" class="time-input" x-model="onboard.sleepTime" value="02:30">
+          </div>
+          <button class="toggle-btn active" style="width:100%; padding:12px; margin-top:16px;" @click="onboardStep = 2">Next</button>
+        </div>
+        <!-- Step 2 -->
+        <div x-show="onboardStep === 2">
+          <div style="font-size:20px; font-weight:700; margin-bottom:16px;">Sport preferences</div>
+          <div class="toggle-row" style="flex-wrap:wrap;">
+            <template x-for="s in ['Swimming','Tennis','Gym','Walking','Yoga','Cold Shower']" :key="s">
+              <button class="toggle-btn" :class="{ active: onboard.sports.includes(s) }"
+                      @click="onboard.sports.includes(s) ? onboard.sports = onboard.sports.filter(x=>x!==s) : onboard.sports.push(s)"
+                      x-text="s" style="margin-bottom:8px;"></button>
+            </template>
+          </div>
+          <button class="toggle-btn active" style="width:100%; padding:12px; margin-top:16px;" @click="onboardStep = 3">Next</button>
+        </div>
+        <!-- Step 3 -->
+        <div x-show="onboardStep === 3">
+          <div style="font-size:20px; font-weight:700; margin-bottom:16px;">Reading anything right now?</div>
+          <input type="text" class="text-input mb-8" placeholder="Book title..." x-model="onboard.bookTitle">
+          <input type="text" class="text-input mb-8" placeholder="Author..." x-model="onboard.bookAuthor">
+          <div style="color:var(--text-muted); font-size:13px; margin-bottom:16px;">Skip if not reading anything.</div>
+          <button class="toggle-btn active" style="width:100%; padding:12px;" @click="onboardStep = 4">Next</button>
+        </div>
+        <!-- Step 4 -->
+        <div x-show="onboardStep === 4">
+          <div style="font-size:20px; font-weight:700; margin-bottom:16px;">Food situation</div>
+          <div class="toggle-row" style="flex-wrap:wrap;">
+            <button class="toggle-btn" :class="{ active: onboard.food === 'cook' }" @click="onboard.food = 'cook'">Have a cook</button>
+            <button class="toggle-btn" :class="{ active: onboard.food === 'self' }" @click="onboard.food = 'self'">Cook myself</button>
+            <button class="toggle-btn" :class="{ active: onboard.food === 'order' }" @click="onboard.food = 'order'">Mostly order in</button>
+            <button class="toggle-btn" :class="{ active: onboard.food === 'mix' }" @click="onboard.food = 'mix'">Mix of everything</button>
+          </div>
+          <button class="toggle-btn active" style="width:100%; padding:12px; margin-top:16px;" @click="onboardStep = 5">Next</button>
+        </div>
+        <!-- Step 5 -->
+        <div x-show="onboardStep === 5">
+          <div style="font-size:20px; font-weight:700; margin-bottom:16px;">One thing to change</div>
+          <div style="color:var(--text-secondary); font-size:14px; margin-bottom:16px;">What's the ONE habit or pattern you want to work on first?</div>
+          <input type="text" class="text-input mb-8" placeholder="e.g. Eat lunch on time, sleep earlier, read daily..." x-model="onboard.oneChange">
+          <button class="toggle-btn active" style="width:100%; padding:12px; margin-top:16px; border-color:var(--green); background:var(--green-dim); color:var(--green);"
+                  @click="completeOnboarding()">Start tracking</button>
+        </div>
+      </div>
+    </div>
+  </template>
+
+  <!-- ===================== SETTINGS DRAWER ===================== -->
+  <div class="drawer-overlay" :class="{ open: drawer === 'settings' }" @click="drawer = null"></div>
+  <div class="drawer" :class="{ open: drawer === 'settings' }" style="max-height:90dvh;">
+    <div class="drawer-handle"></div>
+    <div class="card-title mb-8">Settings</div>
+
+    <!-- Manage Habits -->
+    <div style="margin-bottom:16px;">
+      <div style="font-size:13px; font-weight:600; color:var(--text-secondary); margin-bottom:8px;">Active Habits</div>
+      <template x-for="habit in activeHabits" :key="'sh'+habit.id">
+        <div class="flex-between" style="padding:8px 0; border-bottom:1px solid var(--border);">
+          <span style="font-size:14px;" x-text="habit.name"></span>
+          <div class="flex gap-8">
+            <button style="background:none; border:none; color:var(--amber); font-size:12px; cursor:pointer;"
+                    @click="pauseHabit(habit.id)">Pause</button>
+            <button style="background:none; border:none; color:var(--green); font-size:12px; cursor:pointer;"
+                    @click="graduateHabit(habit.id)">Graduate</button>
+          </div>
+        </div>
+      </template>
+      <div class="mt-8" x-show="activeHabits.length < 3">
+        <input type="text" class="text-input mb-8" placeholder="New habit name..." x-model="newHabitName">
+        <input type="text" class="text-input mb-8" placeholder="Floor version (2-min version)..." x-model="newHabitFloor">
+        <button class="toggle-btn active" style="width:100%; padding:10px;" @click="addHabit()">Add Habit</button>
+      </div>
+      <div class="text-xs text-muted mt-8" x-show="activeHabits.length >= 3">Max 3 active habits. Pause or graduate one to add another.</div>
+    </div>
+
+    <!-- Manage Books -->
+    <div style="margin-bottom:16px;">
+      <div style="font-size:13px; font-weight:600; color:var(--text-secondary); margin-bottom:8px;">Active Books</div>
+      <template x-for="book in activeBooks" :key="'sb'+book.id">
+        <div class="flex-between" style="padding:8px 0; border-bottom:1px solid var(--border);">
+          <span style="font-size:14px;" x-text="book.title"></span>
+          <button style="background:none; border:none; color:var(--red); font-size:12px; cursor:pointer;"
+                  @click="dropBook(book.id)">Drop</button>
+        </div>
+      </template>
+      <div class="mt-8">
+        <input type="text" class="text-input mb-8" placeholder="Book title..." x-model="newBookTitle">
+        <button class="toggle-btn active" style="width:100%; padding:10px;" @click="addBook()">Add Book</button>
+      </div>
+    </div>
+
+    <!-- Start Experiment -->
+    <div style="margin-bottom:16px;">
+      <div style="font-size:13px; font-weight:600; color:var(--text-secondary); margin-bottom:8px;">New Experiment</div>
+      <input type="text" class="text-input mb-8" placeholder="What are you trying for 2 weeks?" x-model="newExpName">
+      <input type="text" class="text-input mb-8" placeholder="Success criteria..." x-model="newExpCriteria">
+      <button class="toggle-btn active" style="width:100%; padding:10px;" @click="startExperiment()">Start 2-Week Experiment</button>
+    </div>
   </div>
 
   <!-- ===================== DRAWERS ===================== -->

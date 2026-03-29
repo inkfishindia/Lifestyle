@@ -1,10 +1,11 @@
-const CACHE_NAME = 'dan-lifestyle-v1';
+const CACHE_NAME = 'dan-lifestyle-v2';
+// Use relative paths — works on any host/subdirectory
 const ASSETS = [
-  '/app/',
-  '/app/index.html',
-  '/app/css/styles.css',
-  '/app/js/app.js',
-  '/app/manifest.json'
+  './',
+  './index.html',
+  './css/styles.css',
+  './js/app.js',
+  './manifest.json'
 ];
 
 self.addEventListener('install', e => {
